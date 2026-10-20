@@ -1,0 +1,11 @@
+{
+  "autoEnableCodemode": false,
+  "mcpServers": {
+    "gortex": {
+      "command": "gortex",
+      "args": ["mcp", "--proxy"],
+      "exposure": "codemode",
+      "description": "Graph-aware code discovery, precise reads and edits, relationships, analysis, refactoring, and durable memory"
+    }
+  }
+}

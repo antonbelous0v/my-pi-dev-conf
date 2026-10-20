@@ -1,0 +1,8 @@
+.DS_Store
+.env
+.env.*
+auth.json
+backups/
+node_modules/
+sessions/
+*.log

@@ -1,0 +1,55 @@
+{
+  "cacheWarming": "off",
+  "compaction": {
+    "enabled": true,
+    "modelOverrides": {
+      "deepseek/deepseek-flash": {
+        "keepRecentTokens": 8000,
+        "reserveTokens": 968000
+      },
+      "deepseek/deepseek-v4-pro": {
+        "keepRecentTokens": 8000,
+        "reserveTokens": 968000
+      }
+    }
+  },
+  "codemode": {
+    "inlineBudget": 0,
+    "mode": "only"
+  },
+  "defaultTools": [
+    "bash",
+    "codemode"
+  ],
+  "defaultModel": "deepseek-flash",
+  "defaultProvider": "deepseek",
+  "defaultThinkingLevel": "medium",
+  "enableInstallTelemetry": false,
+  "lastChangelogVersion": "1.3.0",
+  "packages": [
+    "npm:pi-gortex",
+    "npm:@janvitos/pi-plan-build",
+    "npm:@tian.zuo/pi-usage"
+  ],
+  "extensions": [
+    "!__AGENT_DIR__/extensions/codebase-memory-autotrack.ts",
+    "__AGENT_DIR__/extensions/gortex-autotrack.ts",
+    "__AGENT_DIR__/extensions/gortex-memory.ts",
+    "__AGENT_DIR__/extensions/flash-compaction.ts",
+    "__AGENT_DIR__/extensions/control-plane.ts"
+  ],
+  "retry": {
+    "enabled": true,
+    "maxRetries": 1,
+    "baseDelayMs": 2000,
+    "provider": {
+      "maxRetries": 0,
+      "maxRetryDelayMs": 60000
+    }
+  },
+  "skills": [
+    "!__AGENT_DIR__/skills/*",
+    "!__HOME__/.agents/skills/*"
+  ],
+  "theme": "dark"
+}

@@ -1,0 +1,54 @@
+{
+  "providers": {
+    "android-phone-llama": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "no-key",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "qwen36-27b-aggressive-iq4xl",
+          "name": "Qwen3.6 27B Aggressive IQ4_XL on Android",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 8192,
+          "maxTokens": 2048,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    },
+    "google": {
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "api": "google-generative-ai",
+      "models": [
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1000000,
+          "maxTokens": 65536,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}

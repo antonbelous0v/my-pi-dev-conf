@@ -1,0 +1,13 @@
+{
+  "defaultMode": "build",
+  "shortcuts": {
+    "toggleMode": ["f6"],
+    "toggleModeInEditor": []
+  },
+  "showPlanTitle": true,
+  "questionTool": false,
+  "stableToolCatalog": false,
+  "modeSelections": {
+    "enabled": false
+  }
+}

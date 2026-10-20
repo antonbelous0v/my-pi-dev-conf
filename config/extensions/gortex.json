@@ -1,0 +1,4 @@
+{
+  "bin": "gortex",
+  "hook_mode": "deny"
+}
