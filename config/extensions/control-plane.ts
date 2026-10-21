@@ -20,6 +20,7 @@ type Config = {
   maxOutputTokens: number;
   maxToolCallsPerRun: number;
   maxBrowserToolCallsPerRun: number;
+  maxNestedReadCallsPerRun: number;
   maxRepeatedToolCalls: number;
   maxToolResultChars: number;
 };
@@ -30,8 +31,9 @@ const configPath = join(home, ".pi", "agent", "control-plane.json");
 const defaults: Config = {
   sessionBudgetUsd: 0.75,
   maxOutputTokens: 8000,
-  maxToolCallsPerRun: 40,
-  maxBrowserToolCallsPerRun: 8,
+  maxToolCallsPerRun: 56,
+  maxBrowserToolCallsPerRun: 20,
+  maxNestedReadCallsPerRun: 64,
   maxRepeatedToolCalls: 3,
   maxToolResultChars: 6000,
 };
@@ -75,29 +77,38 @@ const desktopConfig: McpServerConfig = {
   exposure: "codemode",
   description: "Inspect and control native macOS apps through Codex Computer Use",
 };
-const highComplexity = /\b(architect(?:ure|ural)?|audit|security|migration|race condition|deadlock|performance|profil(?:e|ing)|refactor|root cause|distributed|database schema|review)\b|архитектур|аудит|безопасност|миграц|гонк[аи]|дедлок|производительност|профилиров|рефактор|первопричин|распредел[её]н|ревью/iu;
-const browserIntent = /\b(browser|chrome)\b|\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b.{0,40}(?:https?:\/\/|website|site|page|form|job|position|vacancy)|(?:https?:\/\/|\bwebsite|\bsite|\bpage|\bform|\bjob|\bposition|\bvacancy).{0,40}\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b|браузер|хром|(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись).{0,40}(?:https?:\/\/|сайт|страниц|форм|ваканси|позици)|(?:https?:\/\/|сайт|страниц|форм|ваканси|позици).{0,40}(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись)/iu;
+const browserIntent = /\b(?:use|using|via|through|with|open|launch)\b.{0,20}\b(?:browser|chrome)\b|\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b.{0,40}(?:https?:\/\/|website|site|page|form|job|position|vacancy)|(?:https?:\/\/|\bwebsite|\bsite|\bpage|\bform|\bjob|\bposition|\bvacancy).{0,40}\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b|(?:используй|через|в|открой|запусти).{0,20}(?:браузер|хром)|(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись).{0,40}(?:https?:\/\/|сайт|страниц|форм|ваканси|позици)|(?:https?:\/\/|сайт|страниц|форм|ваканси|позици).{0,40}(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись)/iu;
+const hasBrowserIntent = (prompt: string) => browserIntent.test(prompt
+  .replace(/\b(?:do not|don't|never|without)\b.{0,40}\b(?:browser|chrome)\b/giu, "")
+  .replace(/(?:не\s+используй|никогда\s+не|без).{0,40}(?:браузер|хром)/giu, ""));
+const localizationIntent = /\b(?:where|which symbol|locate the (?:function|class|implementation)|find the (?:function|class|symbol) that)\b|\bгде\b.{0,40}\b(?:функци|класс|символ|реализ)|\bкакой символ\b/iu;
 const desktopIntent = /\b(computer use|desktop|finder|xcode|terminal app|native app|click on screen)\b|компьютер юз|рабоч(?:ий стол|ем столе)|файндер|нативн|приложени[ея]|на экране|кликни/iu;
 const browserGuidance = `Browser execution rules:
 - Call mcp__browser__js directly. cua exists only inside its code string.
 - The first call must contain exactly: let tab = await cua.createBrowserTab("chrome", "URL", { sessionName: "🔎 Task" }); No waits, fills, output, visible option, or second API call.
 - The first call returns initial UI state. If it already contains the requested fact, answer immediately; do not issue a confirmation call.
 - In the second call, reuse tab, perform all deterministic Playwright actions sequentially, verify in the same script, and emit only concise JSON with nodeRepl.write. Never use a top-level return or text(...).
+  - For research with several known URLs, open one URL per cua.createBrowserTab call and treat its returned initial UI state as evidence. Do not put several createBrowserTab calls in one script because tab creation yields control immediately. Never probe object keys, pass visible for Chrome, call tab.playwright.goto, use fetch, or assign location.href. Use a link click only for navigation already present on the current page; otherwise create another tab.
 - The Playwright root is tab.playwright itself: use await tab.playwright.locator(selector).fill(value), .click(), .check(), and tab.playwright.evaluate(...). There is no tab.playwright.page, title(), page.fill, or page.check; do not query the page title.
 - For DOM reads, use one tab.playwright.evaluate(...) call. Do not call locator.innerText(), dump broad HTML, or repeat inspection after the initial UI state already answered the request.
 - Browser REPL bindings persist: use let, avoid redeclaring const names, and verify DOM values with direct document.querySelector selectors rather than FormData or named form properties.
 - Do not inspect or claim existing tabs unless the user explicitly referenced one. If bootstrap fails, retry a fresh createBrowserTab once instead of exploring APIs.
 - Treat <redacted> as successful privacy masking for contact fields. Never retry, encode, reconstruct, or bypass it.
 - If told not to submit, simply never click the submit control. Verify requested field values only; do not invent a submitted-state heuristic from the URL.
-- Stop once the requested state is verified. A normal browser task should take two browser calls; use a third only for a concrete recovery.
+  - Stop once the requested state is verified. A normal browser task should take two browser calls. Multi-source research may use one call per source and one focused extraction call only when the initial UI state is insufficient; do not inspect global state unless a tab identifier is genuinely missing.
+  - For multi-source research, spend at most two calls per source. Extract every needed heading or keyword in one evaluate call, stop deep-reading once the requested source count is met, and reserve two calls for recovery and the final source.
 - For uploads, start tab.playwright.waitForEvent("filechooser") before clicking, then call chooser.setFiles() with an absolute path. Do not use locator.setInputFiles().`;
 const gortexGuidance = `Coding execution rules:
 - Make the smallest complete change, preserve validation and unrelated work, inspect affected callers, and verify non-trivial changes.
-- Use Gortex through codemode for source discovery, reads, relationships, impact analysis, edits, and refactors. Inside codemode, tools.bash is always available for builds, tests, package managers, Git, and operations Gortex cannot perform: call it immediately without searchTools or ALL_TOOLS discovery, and batch deterministic shell commands in one script when practical.
-- An exact name or symbol lookup must start with tools.mcp__gortex__search({operation:"symbols",query,options:{limit:5}}), never explore. If its result already answers the request, stop; read source only when body-level details are required, passing the returned ID exactly as tools.mcp__gortex__read({operation:"source",target:{symbol:"returned-id"}}). A source target never accepts path, line, or context. For broad localization, use tools.mcp__gortex__explore({operation:"localize",task,options:{new_user_task:true}}) and follow its required action. When completion.required_action is respond, stop all tool calls and answer immediately. Do not rediscover these tools or pass new_user_task again. Keep tool output and the final answer narrow; omit rejected candidates and source dumps unless asked.
+  - Use Gortex through codemode for source discovery, reads, relationships, impact analysis, edits, and refactors. One codemode invocation should batch 2-6 independent calls with Promise.all when possible; never exceed eight nested calls or generate tool calls programmatically from line numbers. Do not spend one model turn per file or check. Reserve the final eight top-level calls for the requested edit, verification, and answer.
+  - Inside codemode, tools.bash is always available for builds, tests, package managers, Git, and operations Gortex cannot perform. Call it with an object, for example await tools.bash({command:"npm test",timeout_ms:120000}); never pass a bare string and never use a cmd key. Batch deterministic shell commands in one script when practical. Treat MCP results as opaque objects unless you have inspected their shape; do not assume result.content exists or is an array.
+  - An exact name or symbol lookup must start with tools.mcp__gortex__search({operation:"symbols",query,options:{limit:5}}), never explore. If its result already answers the request, stop; read source only when body-level details are required, passing the returned ID exactly as tools.mcp__gortex__read({operation:"source",target:{symbol:"returned-id"},context:{max_lines:160}}). Put max_lines only under context, never under view. A source target never accepts path or line ranges. If a result is buffered or truncated, use tools.mcp__gortex__response({operation:"slice",arguments:{from:1,to:160}}) for a bounded slice; never re-read a file once per line. Never call describeTool; use the exact calls documented here. Use explore only when the user asks where or which symbol implements one behavior and a short localization answer is the final deliverable. Never use explore for implementation, debugging, audits, reviews, assessments, evaluations, or any task requiring multiple symbols. When an explore completion.required_action is respond, stop all tool calls and answer immediately. Do not rediscover these tools or pass new_user_task again. Keep tool output and the final answer narrow; omit rejected candidates and source dumps unless asked.
+  - For review or assessment tasks, stop discovery as soon as the requested number of evidence-backed findings is complete. Do not exhaust the call budget trying to read the entire repository.
+  - For implementation tasks, once a defect and its affected contract are proven, the next codemode call must edit it. Do not continue general exploration; verify the focused change and answer.
 - If tool discovery is genuinely unavoidable, call searchTools with a query string as its first argument, never an object.
 - Use Plan mode only for genuinely multi-step, risky, or multi-session work.`;
 const toolGuidance = "Inside codemode, tools.bash is available. Call known tools directly; do not use searchTools or ALL_TOOLS discovery for standard shell operations. If discovery is unavoidable, searchTools takes a query string first.";
+const answerGuidance = "Finish every requested part, but keep the final answer under 1,800 words and six sections unless the user explicitly asks for exhaustive or unabridged output. Prefer compact tables and evidence over narration; do not repeat source text or discovery history. Never run into the provider output limit: shorten prose before omitting conclusions, verification status, or risks.";
 
 function loadConfig(): Config {
   try {
@@ -177,10 +188,11 @@ export default function controlPlane(pi: ExtensionAPI): void {
   let state: State = { profile: "auto", routing: "auto", budgetUsd: config.sessionBudgetUsd };
   let cost = 0;
   let toolCalls = 0;
+  let nestedReadCalls = 0;
   let repeated = new Map<string, number>();
   let internalModelChange = false;
-  let routedToPro = false;
   let browserRun = false;
+  let allowGortexExplore = false;
   let budgetNotified = false;
   const connected = new Set<McpName>();
 
@@ -198,7 +210,7 @@ export default function controlPlane(pi: ExtensionAPI): void {
     pi.unregisterMcpServer(name);
   };
   const applyProfile = (profile: Profile, prompt = "") => {
-    const wantsBrowser = profile === "browser" || profile === "research" || profile === "full" || (profile === "auto" && browserIntent.test(prompt));
+    const wantsBrowser = profile === "browser" || profile === "research" || profile === "full" || (profile === "auto" && hasBrowserIntent(prompt));
     const wantsDesktop = profile === "desktop" || profile === "full" || (profile === "auto" && desktopIntent.test(prompt));
     if (wantsBrowser) connect("browser"); else disconnect("browser");
     if (wantsDesktop) connect("computer-use"); else disconnect("computer-use");
@@ -323,7 +335,7 @@ export default function controlPlane(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("review", {
-    description: "Review current repository changes with the Pro model",
+    description: "Review current repository changes",
     handler: async (args) => {
       const focus = args.trim() ? ` Focus especially on: ${args.trim()}` : "";
       pi.sendUserMessage(`Review the current repository changes. Inspect the surrounding code, identify correctness, security, performance, and missing-test risks, and report only actionable findings before any summary.${focus}`);
@@ -346,6 +358,7 @@ export default function controlPlane(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     toolCalls = 0;
+    nestedReadCalls = 0;
     repeated = new Map();
     budgetNotified = false;
     cost = sessionCost(ctx);
@@ -356,7 +369,8 @@ export default function controlPlane(pi: ExtensionAPI): void {
       return;
     }
     const prompt = event.messageType === "user" ? event.prompt : "";
-    browserRun = state.profile === "browser" || state.profile === "research" || state.profile === "full" || (state.profile === "auto" && browserIntent.test(prompt));
+    browserRun = state.profile === "browser" || state.profile === "research" || state.profile === "full" || (state.profile === "auto" && hasBrowserIntent(prompt));
+    allowGortexExplore = localizationIntent.test(prompt);
     pi.setActiveTools(browserRun ? [] : ["bash", "codemode"]);
     applyProfile(state.profile, prompt);
     if (browserRun) event.systemPromptOptions.sections.browser_execution = browserGuidance;
@@ -365,18 +379,15 @@ export default function controlPlane(pi: ExtensionAPI): void {
     else event.systemPromptOptions.sections.coding_execution = gortexGuidance;
     if (!browserRun && !event.systemPromptOptions.sections.workspace_context) event.systemPromptOptions.sections.tool_routing = toolGuidance;
     else delete event.systemPromptOptions.sections.tool_routing;
+    event.systemPromptOptions.sections.answer_discipline = answerGuidance;
     if (state.routing === "auto" && ctx.model && (ctx.model.provider !== "deepseek" || !["deepseek-flash", "deepseek-v4-pro"].includes(ctx.model.id))) {
       state = { ...state, routing: "manual" };
       persist();
     }
     if (state.routing === "auto") {
-      routedToPro = highComplexity.test(prompt);
-      await selectModel(ctx, routedToPro ? "pro" : "flash", routedToPro ? "high" : browserRun ? "low" : "medium");
+      await selectModel(ctx, "flash", browserRun ? "low" : "medium");
     } else if (state.routing !== "manual") {
-      routedToPro = false;
       await selectModel(ctx, state.routing, state.routing === "pro" ? "high" : browserRun ? "low" : "medium");
-    } else {
-      routedToPro = false;
     }
     if (state.goal) {
       event.systemPromptOptions.sections.durable_goal = [
@@ -398,7 +409,15 @@ export default function controlPlane(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", (event) => {
-    if (event.parentToolCallId) return;
+    if (event.parentToolCallId) {
+      if (/gortex.*explore/iu.test(event.toolName) && !allowGortexExplore) {
+        return { block: true, reason: "Gortex explore is reserved for single-symbol localization answers. Use batched search and direct source reads for this task." };
+      }
+      if (/gortex.*(?:read|response)/iu.test(event.toolName) && ++nestedReadCalls > config.maxNestedReadCallsPerRun) {
+        return { block: true, reason: `Nested read limit (${config.maxNestedReadCallsPerRun}) reached. Stop reading, use the evidence already collected, and complete the requested edit or answer.` };
+      }
+      return;
+    }
     toolCalls += 1;
     const limit = browserRun ? config.maxBrowserToolCallsPerRun : config.maxToolCallsPerRun;
     if (toolCalls > limit) {
@@ -447,13 +466,9 @@ export default function controlPlane(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("agent_settled", async (_event, ctx) => {
+  pi.on("agent_settled", () => {
     disconnect("browser");
     disconnect("computer-use");
-    if (state.routing === "auto" && routedToPro) {
-      await selectModel(ctx, "flash", "medium");
-      routedToPro = false;
-    }
   });
 
   pi.on("session_shutdown", () => {

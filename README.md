@@ -2,7 +2,7 @@
 
 Portable, token-efficient Pi setup with:
 
-- DeepSeek Flash by default and temporary Pro routing for complex work;
+- DeepSeek Flash by default and explicit Pro routing when requested;
 - Gortex-first code discovery, editing, memory, and repository auto-tracking;
 - Codex Browser and Computer Use integration with automatic process cleanup;
 - early context compaction, complete usage accounting, output limits, retry guards, and a session cost cap;
@@ -39,4 +39,4 @@ This repository intentionally excludes `auth.json`, sessions, memories, trust st
 - `/limit <usd>` — per-session cost cap.
 - `/goal`, `/checkpoint`, `/queue`, `/steer`, `/review` — durable execution helpers.
 
-See [`config/CONTROL_PLANE.md`](config/CONTROL_PLANE.md) for the complete behavior.
+See [`config/CONTROL_PLANE.md`](config/CONTROL_PLANE.md) for the complete behavior and [`BENCHMARK.md`](BENCHMARK.md) for the 45-session stress-test results.
