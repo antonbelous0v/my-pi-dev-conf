@@ -36,20 +36,22 @@ function turnMetadata() {
 
 function approvalFor(params) {
   const meta = params?._meta;
+  if (meta?.codex_approval_kind === "mcp_tool_call") {
+    if (!new Set(["browser-use", "computer-use"]).has(meta.connector_id)) return null;
+    if (
+      meta.full_cdp_access ||
+      meta.sensitive_data ||
+      meta.tool_name === "start_audio_recording" ||
+      String(meta.tool_name ?? "").startsWith("webmcp:")
+    ) {
+      return { action: "decline", content: {} };
+    }
+    return { action: "accept", content: {}, _meta: { persist: "always" } };
+  }
   if (/^Allow ChatGPT to use .+\?$/.test(params?.message ?? "")) {
     return { action: "accept", content: {}, _meta: { persist: "always" } };
   }
-  if (!meta || meta.codex_approval_kind !== "mcp_tool_call") return null;
-  if (!new Set(["browser-use", "computer-use"]).has(meta.connector_id)) return null;
-  if (
-    meta.full_cdp_access ||
-    meta.sensitive_data ||
-    meta.tool_name === "start_audio_recording" ||
-    String(meta.tool_name ?? "").startsWith("webmcp:")
-  ) {
-    return { action: "decline", content: {} };
-  }
-  return { action: "accept", content: {}, _meta: { persist: "always" } };
+  return null;
 }
 
 function stripRuntimeDocumentation(message) {

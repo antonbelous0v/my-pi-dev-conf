@@ -6,7 +6,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, McpServerConfig } from "@earendil-works/pi-coding-agent";
 
 type Profile = "auto" | "code" | "browser" | "desktop" | "research" | "full";
-type Routing = "auto" | "flash" | "pro";
+type Routing = "auto" | "flash" | "pro" | "manual";
 type McpName = "browser" | "computer-use";
 type State = {
   profile: Profile;
@@ -76,13 +76,15 @@ const desktopConfig: McpServerConfig = {
   description: "Inspect and control native macOS apps through Codex Computer Use",
 };
 const highComplexity = /\b(architect(?:ure|ural)?|audit|security|migration|race condition|deadlock|performance|profil(?:e|ing)|refactor|root cause|distributed|database schema|review)\b|архитектур|аудит|безопасност|миграц|гонк[аи]|дедлок|производительност|профилиров|рефактор|первопричин|распредел[её]н|ревью/iu;
-const browserIntent = /\b(browser|chrome|website|web page|login|form|apply|open)\b|браузер|хром|сайт|страниц|ваканси|отклик|форма|авторизац|открой|перейди/iu;
+const browserIntent = /\b(browser|chrome)\b|\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b.{0,40}(?:https?:\/\/|website|site|page|form|job|position|vacancy)|(?:https?:\/\/|\bwebsite|\bsite|\bpage|\bform|\bjob|\bposition|\bvacancy).{0,40}\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b|браузер|хром|(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись).{0,40}(?:https?:\/\/|сайт|страниц|форм|ваканси|позици)|(?:https?:\/\/|сайт|страниц|форм|ваканси|позици).{0,40}(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись)/iu;
 const desktopIntent = /\b(computer use|desktop|finder|xcode|terminal app|native app|click on screen)\b|компьютер юз|рабоч(?:ий стол|ем столе)|файндер|нативн|приложени[ея]|на экране|кликни/iu;
 const browserGuidance = `Browser execution rules:
 - Call mcp__browser__js directly. cua exists only inside its code string.
 - The first call must contain exactly: let tab = await cua.createBrowserTab("chrome", "URL", { sessionName: "🔎 Task" }); No waits, fills, output, visible option, or second API call.
+- The first call returns initial UI state. If it already contains the requested fact, answer immediately; do not issue a confirmation call.
 - In the second call, reuse tab, perform all deterministic Playwright actions sequentially, verify in the same script, and emit only concise JSON with nodeRepl.write. Never use a top-level return or text(...).
 - The Playwright root is tab.playwright itself: use await tab.playwright.locator(selector).fill(value), .click(), .check(), and tab.playwright.evaluate(...). There is no tab.playwright.page, title(), page.fill, or page.check; do not query the page title.
+- For DOM reads, use one tab.playwright.evaluate(...) call. Do not call locator.innerText(), dump broad HTML, or repeat inspection after the initial UI state already answered the request.
 - Browser REPL bindings persist: use let, avoid redeclaring const names, and verify DOM values with direct document.querySelector selectors rather than FormData or named form properties.
 - Do not inspect or claim existing tabs unless the user explicitly referenced one. If bootstrap fails, retry a fresh createBrowserTab once instead of exploring APIs.
 - Treat <redacted> as successful privacy masking for contact fields. Never retry, encode, reconstruct, or bypass it.
@@ -109,14 +111,19 @@ function isState(value: unknown): value is State {
   if (!value || typeof value !== "object") return false;
   const state = value as Partial<State>;
   return ["auto", "code", "browser", "desktop", "research", "full"].includes(state.profile ?? "")
-    && ["auto", "flash", "pro"].includes(state.routing ?? "")
+    && ["auto", "flash", "pro", "manual"].includes(state.routing ?? "")
     && (state.budgetUsd === null || typeof state.budgetUsd === "number");
 }
 
 function sessionCost(ctx: ExtensionContext): number {
   return ctx.sessionManager.getBranch().reduce((total, entry) => {
-    if (entry.type !== "message" || entry.message.role !== "assistant") return total;
-    return total + ((entry.message as AssistantMessage).usage?.cost?.total ?? 0);
+    if (entry.type === "message" && entry.message.role === "assistant") {
+      return total + ((entry.message as AssistantMessage).usage?.cost?.total ?? 0);
+    }
+    if (entry.type === "usage" || entry.type === "compaction" || entry.type === "branch_summary") {
+      return total + (entry.usage?.cost?.total ?? 0);
+    }
+    return total;
   }, 0);
 }
 
@@ -341,6 +348,13 @@ export default function controlPlane(pi: ExtensionAPI): void {
     toolCalls = 0;
     repeated = new Map();
     budgetNotified = false;
+    cost = sessionCost(ctx);
+    if (state.budgetUsd != null && cost >= state.budgetUsd) {
+      budgetNotified = true;
+      notify(ctx, `Session cost cap reached: $${cost.toFixed(4)} / $${state.budgetUsd.toFixed(2)}`, "warning");
+      ctx.abort();
+      return;
+    }
     const prompt = event.messageType === "user" ? event.prompt : "";
     browserRun = state.profile === "browser" || state.profile === "research" || state.profile === "full" || (state.profile === "auto" && browserIntent.test(prompt));
     pi.setActiveTools(browserRun ? [] : ["bash", "codemode"]);
@@ -351,12 +365,18 @@ export default function controlPlane(pi: ExtensionAPI): void {
     else event.systemPromptOptions.sections.coding_execution = gortexGuidance;
     if (!browserRun && !event.systemPromptOptions.sections.workspace_context) event.systemPromptOptions.sections.tool_routing = toolGuidance;
     else delete event.systemPromptOptions.sections.tool_routing;
+    if (state.routing === "auto" && ctx.model && (ctx.model.provider !== "deepseek" || !["deepseek-flash", "deepseek-v4-pro"].includes(ctx.model.id))) {
+      state = { ...state, routing: "manual" };
+      persist();
+    }
     if (state.routing === "auto") {
       routedToPro = highComplexity.test(prompt);
       await selectModel(ctx, routedToPro ? "pro" : "flash", routedToPro ? "high" : browserRun ? "low" : "medium");
-    } else {
+    } else if (state.routing !== "manual") {
       routedToPro = false;
       await selectModel(ctx, state.routing, state.routing === "pro" ? "high" : browserRun ? "low" : "medium");
+    } else {
+      routedToPro = false;
     }
     if (state.goal) {
       event.systemPromptOptions.sections.durable_goal = [
@@ -392,9 +412,16 @@ export default function controlPlane(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("tool_result", (event) => {
-    const content = truncateContent(event.content, config.maxToolResultChars);
-    if (content) return { content };
+  pi.on("tool_result", (event, ctx) => {
+    let content = event.content;
+    if (ctx.model?.provider === "deepseek" && content.some((block) => block.type === "image")) {
+      content = [
+        ...content.filter((block) => block.type === "text"),
+        { type: "text", text: "[Image tool output omitted for the active text-only model.]" },
+      ];
+    }
+    const truncated = truncateContent(content, config.maxToolResultChars);
+    if (truncated || content !== event.content) return { content: truncated ?? content };
   });
 
   pi.on("message_end", (event, ctx) => {
@@ -408,9 +435,12 @@ export default function controlPlane(pi: ExtensionAPI): void {
   });
 
   pi.on("model_select", (event) => {
-    if (internalModelChange || event.source !== "set") return;
-    if (event.model.provider !== "deepseek") return;
-    const routing = event.model.id === "deepseek-v4-pro" ? "pro" : event.model.id === "deepseek-flash" ? "flash" : state.routing;
+    if (internalModelChange || event.source === "restore") return;
+    const routing: Routing = event.model.provider === "deepseek" && event.model.id === "deepseek-v4-pro"
+      ? "pro"
+      : event.model.provider === "deepseek" && event.model.id === "deepseek-flash"
+        ? "flash"
+        : "manual";
     if (routing !== state.routing) {
       state = { ...state, routing };
       persist();

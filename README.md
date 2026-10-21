@@ -5,7 +5,7 @@ Portable, token-efficient Pi setup with:
 - DeepSeek Flash by default and temporary Pro routing for complex work;
 - Gortex-first code discovery, editing, memory, and repository auto-tracking;
 - Codex Browser and Computer Use integration with automatic process cleanup;
-- early context compaction, output limits, retry guards, and a session cost cap;
+- early context compaction, complete usage accounting, output limits, retry guards, and a session cost cap;
 - isolated Git worktrees through `pi-worktree`.
 
 ## Install
@@ -25,7 +25,7 @@ git pull --ff-only
 ./install.sh
 ```
 
-The installer backs up every replaced file under `~/.pi/agent/backups/`, installs extension packages through Pi, validates JSON and shell syntax, and checks the Gortex MCP connection.
+The installer backs up every replaced file under `~/.pi/agent/backups/`, installs pinned extension versions through Pi, validates JSON and shell syntax, and checks the Gortex MCP connection. Re-running it skips packages already at the expected version.
 
 ## Credentials and private data
 

@@ -39,9 +39,19 @@ cp -R "$repo_dir/config/extensions/." "$agent_dir/extensions/"
 cp -R "$repo_dir/config/bin/." "$agent_dir/bin/"
 chmod +x "$agent_dir/bin/pi-worktree"
 
-for package in npm:pi-gortex npm:@janvitos/pi-plan-build npm:@tian.zuo/pi-usage; do
-  pi install "$package"
-done
+install_package() {
+  package=$1
+  path=$2
+  version=$3
+  installed=$(node -e 'try { process.stdout.write(require(process.argv[1]).version) } catch {}' "$agent_dir/npm/node_modules/$path/package.json")
+  if [ "$installed" != "$version" ]; then
+    pi install "$package@$version"
+  fi
+}
+
+install_package npm:pi-gortex pi-gortex 0.3.0
+install_package npm:@janvitos/pi-plan-build @janvitos/pi-plan-build 0.1.120
+install_package npm:@tian.zuo/pi-usage @tian.zuo/pi-usage 0.5.0
 
 mkdir -p "$HOME/.local/bin"
 launcher="$HOME/.local/bin/pi-worktree"
