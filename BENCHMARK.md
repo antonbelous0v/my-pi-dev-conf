@@ -39,7 +39,7 @@ Mechanical completion means the final assistant event ended with `stop` and cont
 - Automatic routing now stays on DeepSeek Flash. V4 Pro remains an explicit `/route pro` choice.
 - Browser runs use Flash with low thinking and activate only for positive browser/action intent; negated phrases and code terms such as “browser database” do not start it.
 - Browser instructions match the actual Codex CUA API, favor one initial-state read per source, batch DOM extraction, and forbid unsupported `goto`, `fetch`, `visible`, and object-probing patterns.
-- Top-level calls are capped at 56, browser calls at 20, nested Gortex reads at 64, identical retries at three, and tool output at 6,000 characters.
+- Browser calls are capped at 20, nested Gortex reads at 64, identical retries at three, and tool output at 6,000 characters. Ordinary coding runs have no numeric top-level cap because a later real multi-repository CI workflow reached 56 legitimate calls before its authorized commit, push, and PR steps; the cost and loop guards remain active.
 - Gortex reads use exact schemas, buffered slices, bounded batching, and implementation-first behavior after a defect is proven.
 - `explore` is allowed only for an explicit single-symbol localization request and is blocked for implementation, debugging, audit, review, assessment, and other multi-symbol work.
 - Final answers default to fewer than 1,800 words and six sections, preserving conclusions, verification, and risks before the provider output limit.

@@ -18,7 +18,6 @@ type State = {
 type Config = {
   sessionBudgetUsd: number;
   maxOutputTokens: number;
-  maxToolCallsPerRun: number;
   maxBrowserToolCallsPerRun: number;
   maxNestedReadCallsPerRun: number;
   maxRepeatedToolCalls: number;
@@ -31,7 +30,6 @@ const configPath = join(home, ".pi", "agent", "control-plane.json");
 const defaults: Config = {
   sessionBudgetUsd: 0.75,
   maxOutputTokens: 8000,
-  maxToolCallsPerRun: 56,
   maxBrowserToolCallsPerRun: 20,
   maxNestedReadCallsPerRun: 64,
   maxRepeatedToolCalls: 3,
@@ -100,8 +98,8 @@ const browserGuidance = `Browser execution rules:
 - For uploads, start tab.playwright.waitForEvent("filechooser") before clicking, then call chooser.setFiles() with an absolute path. Do not use locator.setInputFiles().`;
 const gortexGuidance = `Coding execution rules:
 - Make the smallest complete change, preserve validation and unrelated work, inspect affected callers, and verify non-trivial changes.
-  - Use Gortex through codemode for source discovery, reads, relationships, impact analysis, edits, and refactors. One codemode invocation should batch 2-6 independent calls with Promise.all when possible; never exceed eight nested calls or generate tool calls programmatically from line numbers. Do not spend one model turn per file or check. Reserve the final eight top-level calls for the requested edit, verification, and answer.
-  - Inside codemode, tools.bash is always available for builds, tests, package managers, Git, and operations Gortex cannot perform. Call it with an object, for example await tools.bash({command:"npm test",timeout_ms:120000}); never pass a bare string and never use a cmd key. Batch deterministic shell commands in one script when practical. Treat MCP results as opaque objects unless you have inspected their shape; do not assume result.content exists or is an array.
+  - Use Gortex through codemode for source discovery, reads, relationships, impact analysis, edits, and refactors. One codemode invocation should batch 2-6 independent calls with Promise.all when possible; never exceed eight nested calls or generate tool calls programmatically from line numbers. Do not spend one model turn per file or check.
+  - Inside codemode, tools.bash is always available for builds, tests, package managers, Git, and operations Gortex cannot perform. Call it with an object, for example await tools.bash({command:"npm test",timeout_ms:120000}); never pass a bare string and never use a cmd key. Batch deterministic shell commands in one script when practical. For GitHub and CI workflows, batch repository and PR status queries, use one bounded watch instead of repeated sleep-and-poll calls, and finish explicitly authorized commit, push, or PR actions once the change is verified. Treat MCP results as opaque objects unless you have inspected their shape; do not assume result.content exists or is an array.
   - An exact name or symbol lookup must start with tools.mcp__gortex__search({operation:"symbols",query,options:{limit:5}}), never explore. If its result already answers the request, stop; read source only when body-level details are required, passing the returned ID exactly as tools.mcp__gortex__read({operation:"source",target:{symbol:"returned-id"},context:{max_lines:160}}). Put max_lines only under context, never under view. A source target never accepts path or line ranges. If a result is buffered or truncated, use tools.mcp__gortex__response({operation:"slice",arguments:{from:1,to:160}}) for a bounded slice; never re-read a file once per line. Never call describeTool; use the exact calls documented here. Use explore only when the user asks where or which symbol implements one behavior and a short localization answer is the final deliverable. Never use explore for implementation, debugging, audits, reviews, assessments, evaluations, or any task requiring multiple symbols. When an explore completion.required_action is respond, stop all tool calls and answer immediately. Do not rediscover these tools or pass new_user_task again. Keep tool output and the final answer narrow; omit rejected candidates and source dumps unless asked.
   - For review or assessment tasks, stop discovery as soon as the requested number of evidence-backed findings is complete. Do not exhaust the call budget trying to read the entire repository.
   - For implementation tasks, once a defect and its affected contract are proven, the next codemode call must edit it. Do not continue general exploration; verify the focused change and answer.
@@ -418,10 +416,8 @@ export default function controlPlane(pi: ExtensionAPI): void {
       }
       return;
     }
-    toolCalls += 1;
-    const limit = browserRun ? config.maxBrowserToolCallsPerRun : config.maxToolCallsPerRun;
-    if (toolCalls > limit) {
-      return { block: true, reason: `Top-level tool-call limit (${limit}) reached. Stop retrying, report the verified result and any concrete blocker.` };
+    if (browserRun && ++toolCalls > config.maxBrowserToolCallsPerRun) {
+      return { block: true, reason: `Browser tool-call limit (${config.maxBrowserToolCallsPerRun}) reached. Stop retrying, report the verified result and any concrete blocker.` };
     }
     const key = `${event.toolName}:${JSON.stringify(event.input)}`;
     const count = (repeated.get(key) ?? 0) + 1;

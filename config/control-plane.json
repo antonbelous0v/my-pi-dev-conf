@@ -1,7 +1,6 @@
 {
   "sessionBudgetUsd": 0.75,
   "maxOutputTokens": 8000,
-  "maxToolCallsPerRun": 56,
   "maxBrowserToolCallsPerRun": 20,
   "maxNestedReadCallsPerRun": 64,
   "maxRepeatedToolCalls": 3,
