@@ -75,7 +75,7 @@ const desktopConfig: McpServerConfig = {
   exposure: "codemode",
   description: "Inspect and control native macOS apps through Codex Computer Use",
 };
-const browserIntent = /\b(?:use|using|via|through|with|open|launch)\b.{0,20}\b(?:browser|chrome)\b|\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b.{0,40}(?:https?:\/\/|website|site|page|form|job|position|vacancy)|(?:https?:\/\/|\bwebsite|\bsite|\bpage|\bform|\bjob|\bposition|\bvacancy).{0,40}\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b|(?:используй|через|в|открой|запусти).{0,20}(?:браузер|хром)|(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись).{0,40}(?:https?:\/\/|сайт|страниц|форм|ваканси|позици)|(?:https?:\/\/|сайт|страниц|форм|ваканси|позици).{0,40}(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись)/iu;
+const browserIntent = /createBrowserTab|tab\.goto|\b(?:use|using|via|through|with|open|launch)\b.{0,20}\b(?:browser|chrome|tab)\b|\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b.{0,40}(?:https?:\/\/|website|site|page|form|job|position|vacancy)|(?:https?:\/\/|\bwebsite|\bsite|\bpage|\bform|\bjob|\bposition|\bvacancy).{0,40}\b(?:open|visit|navigate|go to|log in|sign in|fill|submit|apply to)\b|(?:используй|через|в|открой|запусти).{0,20}(?:браузер|хром|вкладк)|(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись).{0,40}(?:https?:\/\/|сайт|страниц|форм|ваканси|позици)|(?:https?:\/\/|сайт|страниц|форм|ваканси|позици).{0,40}(?:открой|перейди|зайди|авторизуйся|заполни|отправь|откликнись)/iu;
 const hasBrowserIntent = (prompt: string) => browserIntent.test(prompt
   .replace(/\b(?:do not|don't|never|without)\b.{0,40}\b(?:browser|chrome)\b/giu, "")
   .replace(/(?:не\s+используй|никогда\s+не|без).{0,40}(?:браузер|хром)/giu, ""));
@@ -84,7 +84,7 @@ const desktopIntent = /\b(computer use|desktop|finder|xcode|terminal app|native 
 const browserContinuationIntent = /\b(?:continue|proceed|keep going|resume|salary|application|vacanc|browser|tab)\b|продолж|резюме|зарплат|отклик|ваканс|браузер|вкладк/iu;
 const browserGuidance = (sessionName: string) => `Browser execution rules:
 - Call mcp__browser__js directly. cua exists only inside its code string.
-- Create exactly one tab for the whole run. The first call must contain exactly: let tab = await cua.createBrowserTab("chrome", "URL", { sessionName: "${sessionName}" }); Never call createBrowserTab again in this run. No waits, fills, output, visible option, or second API call in the first invocation.
+- Create exactly one tab for the whole run. The first call must contain exactly: let tab = await cua.createBrowserTab("chrome", "HTTPS_URL", { sessionName: "${sessionName}" }); The initial URL must use http or https; never open a local file in the browser. Never call createBrowserTab again after it succeeds. No waits, fills, output, visible option, or second API call in the first invocation.
 - Reuse the persistent tab binding for every site. Navigate that same tab with await tab.goto("URL"), then inspect and act through tab.playwright. Never create a second tab, claim another tab, or replace the tab binding.
 - Never access Chrome DevTools endpoints or port 9222, use CDP/Target.createTarget or /json/new, or write shell/Python/Node browser drivers. If the browser MCP or the retained tab fails, retry the same operation once, then report the blocker.
 - The first call returns initial UI state. If it already contains the requested fact, answer immediately; do not issue a confirmation call.
@@ -194,6 +194,7 @@ export default function controlPlane(pi: ExtensionAPI): void {
   let internalModelChange = false;
   let browserRun = false;
   let browserTabCreated = false;
+  let browserTabCreatePending = false;
   let allowGortexExplore = false;
   let budgetNotified = false;
   const browserSessionName = `🔎 Pi ${Date.now().toString(36).slice(-6)}`;
@@ -414,18 +415,23 @@ export default function controlPlane(pi: ExtensionAPI): void {
 
   pi.on("tool_call", (event) => {
     const input = JSON.stringify(event.input) ?? "";
+    const code = typeof event.input.code === "string" ? event.input.code : "";
     if (browserRun && /(?:127\.0\.0\.1:9222|Target\.createTarget|\/json\/new|remote-debugging-port|(?:^|[\\/])cdp\.js)/iu.test(input)) {
       return { block: true, reason: "Raw Chrome DevTools/CDP automation bypasses the session tab group. Use mcp__browser__js and cua.createBrowserTab with the required sessionName." };
     }
-    if (browserRun && /createBrowserTab/iu.test(input)) {
-      if (browserTabCreated) {
+    if (browserRun && /createBrowserTab/iu.test(code)) {
+      if (browserTabCreated || browserTabCreatePending) {
         return { block: true, reason: "This browser session already created its single tab. Reuse the persistent tab binding and navigate it with await tab.goto(\"URL\")." };
       }
-      const sessionName = input.match(/sessionName\\?"?\s*:\s*\\?"([^"\\]+)\\?"/u)?.[1];
+      const initialUrl = code.match(/createBrowserTab\(\s*["']chrome["']\s*,\s*["']([^"']+)/u)?.[1];
+      if (!initialUrl || !/^https?:\/\//iu.test(initialUrl)) {
+        return { block: true, reason: "The session tab must start on an http or https URL. Read local files with file tooling, then create the browser tab on the first website." };
+      }
+      const sessionName = code.match(/sessionName\s*:\s*["']([^"']+)["']/u)?.[1];
       if (sessionName !== browserSessionName) {
         return { block: true, reason: `Every browser tab in this run must use { sessionName: "${browserSessionName}" } so it stays in the session group.` };
       }
-      browserTabCreated = true;
+      browserTabCreatePending = true;
     }
     if (event.parentToolCallId) {
       if (/gortex.*explore/iu.test(event.toolName) && !allowGortexExplore) {
@@ -448,6 +454,10 @@ export default function controlPlane(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", (event, ctx) => {
+    if (browserRun && event.toolName === "mcp__browser__js" && browserTabCreatePending && /createBrowserTab/iu.test(JSON.stringify(event.input))) {
+      browserTabCreatePending = false;
+      if (!event.isError) browserTabCreated = true;
+    }
     let content = event.content;
     if (ctx.model?.provider === "deepseek" && content.some((block) => block.type === "image")) {
       content = [
