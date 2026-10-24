@@ -81,16 +81,19 @@ const hasBrowserIntent = (prompt: string) => browserIntent.test(prompt
   .replace(/(?:не\s+используй|никогда\s+не|без).{0,40}(?:браузер|хром)/giu, ""));
 const localizationIntent = /\b(?:where|which symbol|locate the (?:function|class|implementation)|find the (?:function|class|symbol) that)\b|\bгде\b.{0,40}\b(?:функци|класс|символ|реализ)|\bкакой символ\b/iu;
 const desktopIntent = /\b(computer use|desktop|finder|xcode|terminal app|native app|click on screen)\b|компьютер юз|рабоч(?:ий стол|ем столе)|файндер|нативн|приложени[ея]|на экране|кликни/iu;
-const browserGuidance = `Browser execution rules:
+const browserContinuationIntent = /\b(?:continue|proceed|keep going|resume|salary|application|vacanc|browser|tab)\b|продолж|резюме|зарплат|отклик|ваканс|браузер|вкладк/iu;
+const browserGuidance = (sessionName: string) => `Browser execution rules:
 - Call mcp__browser__js directly. cua exists only inside its code string.
-- The first call must contain exactly: let tab = await cua.createBrowserTab("chrome", "URL", { sessionName: "🔎 Task" }); No waits, fills, output, visible option, or second API call.
+- Create exactly one tab for the whole run. The first call must contain exactly: let tab = await cua.createBrowserTab("chrome", "URL", { sessionName: "${sessionName}" }); Never call createBrowserTab again in this run. No waits, fills, output, visible option, or second API call in the first invocation.
+- Reuse the persistent tab binding for every site. Navigate that same tab with await tab.goto("URL"), then inspect and act through tab.playwright. Never create a second tab, claim another tab, or replace the tab binding.
+- Never access Chrome DevTools endpoints or port 9222, use CDP/Target.createTarget or /json/new, or write shell/Python/Node browser drivers. If the browser MCP or the retained tab fails, retry the same operation once, then report the blocker.
 - The first call returns initial UI state. If it already contains the requested fact, answer immediately; do not issue a confirmation call.
 - In the second call, reuse tab, perform all deterministic Playwright actions sequentially, verify in the same script, and emit only concise JSON with nodeRepl.write. Never use a top-level return or text(...).
-  - For research with several known URLs, open one URL per cua.createBrowserTab call and treat its returned initial UI state as evidence. Do not put several createBrowserTab calls in one script because tab creation yields control immediately. Never probe object keys, pass visible for Chrome, call tab.playwright.goto, use fetch, or assign location.href. Use a link click only for navigation already present on the current page; otherwise create another tab.
+  - For research with several known URLs, navigate the retained tab with await tab.goto("URL") and inspect each page before moving to the next. Never probe object keys, pass visible for Chrome, call tab.playwright.goto, use fetch, or assign location.href.
 - The Playwright root is tab.playwright itself: use await tab.playwright.locator(selector).fill(value), .click(), .check(), and tab.playwright.evaluate(...). There is no tab.playwright.page, title(), page.fill, or page.check; do not query the page title.
 - For DOM reads, use one tab.playwright.evaluate(...) call. Do not call locator.innerText(), dump broad HTML, or repeat inspection after the initial UI state already answered the request.
 - Browser REPL bindings persist: use let, avoid redeclaring const names, and verify DOM values with direct document.querySelector selectors rather than FormData or named form properties.
-- Do not inspect or claim existing tabs unless the user explicitly referenced one. If bootstrap fails, retry a fresh createBrowserTab once instead of exploring APIs.
+- Do not inspect or claim existing tabs unless the user explicitly referenced one. If the single-tab bootstrap fails, report the blocker instead of exploring APIs or creating another tab.
 - Treat <redacted> as successful privacy masking for contact fields. Never retry, encode, reconstruct, or bypass it.
 - If told not to submit, simply never click the submit control. Verify requested field values only; do not invent a submitted-state heuristic from the URL.
   - Stop once the requested state is verified. A normal browser task should take two browser calls. Multi-source research may use one call per source and one focused extraction call only when the initial UI state is insufficient; do not inspect global state unless a tab identifier is genuinely missing.
@@ -190,8 +193,10 @@ export default function controlPlane(pi: ExtensionAPI): void {
   let repeated = new Map<string, number>();
   let internalModelChange = false;
   let browserRun = false;
+  let browserTabCreated = false;
   let allowGortexExplore = false;
   let budgetNotified = false;
+  const browserSessionName = `🔎 Pi ${Date.now().toString(36).slice(-6)}`;
   const connected = new Set<McpName>();
 
   const persist = () => pi.appendEntry(stateType, state);
@@ -207,8 +212,8 @@ export default function controlPlane(pi: ExtensionAPI): void {
     if (!connected.delete(name)) return;
     pi.unregisterMcpServer(name);
   };
-  const applyProfile = (profile: Profile, prompt = "") => {
-    const wantsBrowser = profile === "browser" || profile === "research" || profile === "full" || (profile === "auto" && hasBrowserIntent(prompt));
+  const applyProfile = (profile: Profile, prompt = "", continueBrowser = false) => {
+    const wantsBrowser = continueBrowser || profile === "browser" || profile === "research" || profile === "full" || (profile === "auto" && hasBrowserIntent(prompt));
     const wantsDesktop = profile === "desktop" || profile === "full" || (profile === "auto" && desktopIntent.test(prompt));
     if (wantsBrowser) connect("browser"); else disconnect("browser");
     if (wantsDesktop) connect("computer-use"); else disconnect("computer-use");
@@ -367,11 +372,12 @@ export default function controlPlane(pi: ExtensionAPI): void {
       return;
     }
     const prompt = event.messageType === "user" ? event.prompt : "";
-    browserRun = state.profile === "browser" || state.profile === "research" || state.profile === "full" || (state.profile === "auto" && hasBrowserIntent(prompt));
+    const continuingBrowserRun = browserRun && (event.messageType !== "user" || browserContinuationIntent.test(prompt));
+    browserRun = state.profile === "browser" || state.profile === "research" || state.profile === "full" || (state.profile === "auto" && (hasBrowserIntent(prompt) || continuingBrowserRun));
     allowGortexExplore = localizationIntent.test(prompt);
     pi.setActiveTools(browserRun ? [] : ["bash", "codemode"]);
-    applyProfile(state.profile, prompt);
-    if (browserRun) event.systemPromptOptions.sections.browser_execution = browserGuidance;
+    applyProfile(state.profile, prompt, browserRun);
+    if (browserRun) event.systemPromptOptions.sections.browser_execution = browserGuidance(browserSessionName);
     else delete event.systemPromptOptions.sections.browser_execution;
     if (browserRun || !event.systemPromptOptions.sections.workspace_context) delete event.systemPromptOptions.sections.coding_execution;
     else event.systemPromptOptions.sections.coding_execution = gortexGuidance;
@@ -407,6 +413,20 @@ export default function controlPlane(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", (event) => {
+    const input = JSON.stringify(event.input) ?? "";
+    if (browserRun && /(?:127\.0\.0\.1:9222|Target\.createTarget|\/json\/new|remote-debugging-port|(?:^|[\\/])cdp\.js)/iu.test(input)) {
+      return { block: true, reason: "Raw Chrome DevTools/CDP automation bypasses the session tab group. Use mcp__browser__js and cua.createBrowserTab with the required sessionName." };
+    }
+    if (browserRun && /createBrowserTab/iu.test(input)) {
+      if (browserTabCreated) {
+        return { block: true, reason: "This browser session already created its single tab. Reuse the persistent tab binding and navigate it with await tab.goto(\"URL\")." };
+      }
+      const sessionName = input.match(/sessionName\\?"?\s*:\s*\\?"([^"\\]+)\\?"/u)?.[1];
+      if (sessionName !== browserSessionName) {
+        return { block: true, reason: `Every browser tab in this run must use { sessionName: "${browserSessionName}" } so it stays in the session group.` };
+      }
+      browserTabCreated = true;
+    }
     if (event.parentToolCallId) {
       if (/gortex.*explore/iu.test(event.toolName) && !allowGortexExplore) {
         return { block: true, reason: "Gortex explore is reserved for single-symbol localization answers. Use batched search and direct source reads for this task." };

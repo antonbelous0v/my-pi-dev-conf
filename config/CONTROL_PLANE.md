@@ -22,6 +22,7 @@ The default setup uses DeepSeek Flash with medium thinking, Gortex through code 
 - Browser uploads use Playwright's `filechooser` event followed by `chooser.setFiles()` with an absolute path.
 - Non-submit form tasks verify the requested field values without speculative URL-based submission checks.
 - Browser file transfers are auto-approved; full CDP, sensitive-data access, audio recording, and WebMCP remain blocked.
+- Each browser run creates exactly one Chrome tab in a uniquely named session group and reuses it with `tab.goto(...)` for every site. Further tab creation, raw CDP, port 9222, `Target.createTarget`, `/json/new`, and custom browser-driver scripts are blocked so the agent cannot silently leave the group after an MCP error or compaction.
 - Coding/Gortex instructions are omitted from browser runs, while browser instructions are omitted from ordinary coding runs.
 - Coding/Gortex instructions are also omitted outside tracked repositories. Repository discovery and pinned memories are cached for the session; only task-relevant memory lookup repeats per turn.
 - Outside repositories, a short routing hint prevents tool-schema discovery before ordinary shell commands.
