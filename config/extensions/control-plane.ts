@@ -30,7 +30,7 @@ const configPath = join(home, ".pi", "agent", "control-plane.json");
 const defaults: Config = {
   sessionBudgetUsd: 0.75,
   maxOutputTokens: 8000,
-  maxBrowserToolCallsPerRun: 20,
+  maxBrowserToolCallsPerRun: 96,
   maxNestedReadCallsPerRun: 64,
   maxRepeatedToolCalls: 3,
   maxToolResultChars: 6000,
@@ -436,7 +436,7 @@ export default function controlPlane(pi: ExtensionAPI): void {
       }
       return;
     }
-    if (browserRun && ++toolCalls > config.maxBrowserToolCallsPerRun) {
+    if (browserRun && event.toolName === "mcp__browser__js" && ++toolCalls > config.maxBrowserToolCallsPerRun) {
       return { block: true, reason: `Browser tool-call limit (${config.maxBrowserToolCallsPerRun}) reached. Stop retrying, report the verified result and any concrete blocker.` };
     }
     const key = `${event.toolName}:${JSON.stringify(event.input)}`;
