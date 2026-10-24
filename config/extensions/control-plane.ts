@@ -376,8 +376,8 @@ export default function controlPlane(pi: ExtensionAPI): void {
     const continuingBrowserRun = browserRun && (event.messageType !== "user" || browserContinuationIntent.test(prompt));
     browserRun = state.profile === "browser" || state.profile === "research" || state.profile === "full" || (state.profile === "auto" && (hasBrowserIntent(prompt) || continuingBrowserRun));
     allowGortexExplore = localizationIntent.test(prompt);
-    pi.setActiveTools(browserRun ? [] : ["bash", "codemode"]);
     applyProfile(state.profile, prompt, browserRun);
+    pi.setActiveTools(browserRun ? ["mcp__browser__js"] : ["bash", "codemode"]);
     if (browserRun) event.systemPromptOptions.sections.browser_execution = browserGuidance(browserSessionName);
     else delete event.systemPromptOptions.sections.browser_execution;
     if (browserRun || !event.systemPromptOptions.sections.workspace_context) delete event.systemPromptOptions.sections.coding_execution;
@@ -493,7 +493,6 @@ export default function controlPlane(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", () => {
-    disconnect("browser");
     disconnect("computer-use");
   });
 

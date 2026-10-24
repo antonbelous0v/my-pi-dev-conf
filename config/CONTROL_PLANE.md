@@ -12,9 +12,9 @@ The default setup uses DeepSeek Flash with medium thinking, Gortex through code 
 - Exact Gortex lookups stop after `search.symbols` when location metadata is enough and call `read.source` only for body-level details. Multi-symbol work batches search plus direct source reads. Both avoid schema discovery, invalid `new_user_task` retries, rejected-candidate recaps, and unsolicited source dumps.
 - Gortex `explore` is allowed only when the prompt explicitly asks where a function, class, symbol, or implementation lives. The control plane blocks it for implementation, debugging, audit, review, assessment, evaluation, and other multi-symbol work so localization state cannot lock the rest of the task.
 - Any Gortex `required_action: respond` is a hard stop for further tool calls.
-- Browser and Computer Use MCP servers start only for a run that needs them and stop whenever the run settles, including explicit capability profiles.
+- Browser and Computer Use MCP servers start only for a run that needs them. Computer Use stops whenever the run settles; the lightweight browser bridge stays connected after a browser turn so its single `tab` binding survives follow-up turns, and closes on session shutdown or a later non-browser profile transition.
 - Browser intent requires a non-negated use/open phrase near a browser name or an action-target pair, avoiding accidental startup for coding phrases such as “browser database”, “do not use a browser”, “open source”, or “apply patch”.
-- Browser runs expose only the direct `mcp__browser__js` tool; desktop runs expose only `codemode`. The usual `bash` and `codemode` set is restored automatically for ordinary coding turns.
+- Browser runs explicitly activate only the direct `mcp__browser__js` tool, including continuation turns; desktop runs expose only `codemode`. The usual `bash` and `codemode` set is restored automatically for ordinary coding turns.
 - MCP servers cannot silently reactivate `codemode`; it remains explicitly available through the normal default tool set.
 - Gortex MCP stays connected because Pi cannot reliably expose a dynamically registered code-mode server in the same turn; this avoids costly shell fallbacks.
 - Browser instructions are injected only into browser runs, and first-use MCP documentation is stripped after the bridge initializes the runtime.
